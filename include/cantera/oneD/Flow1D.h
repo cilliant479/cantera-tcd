@@ -890,6 +890,18 @@ protected:
     vector<double> m_visc; //!< Dynamic viscosity at each grid point [Pa∙s]
     vector<double> m_tcon; //!< Thermal conductivity at each grid point [W/m/K]
 
+    // C.Thomas, Thickened Flame Properties
+    // Set default to 1.0 to check first if works
+    double m_fsp = 1.0;
+    double m_fth = 1.0;
+    double m_fr = 1.0;
+    // Setter method to allow user modification
+    void setThickenedFlame(double fsp, double fth, double fr) {
+    this->m_fsp = fsp;
+    this->m_fth = fth;
+    this->m_fr = fr;
+    }
+
     //! Coefficient used in diffusion calculations for each species at each grid point.
     //!
     //! The value stored is different depending on the transport model (multicomponent

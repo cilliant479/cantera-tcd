@@ -326,6 +326,7 @@ void Flow1D::eval(size_t jGlobal, span<const double> xGlobal, span<double> rsdGl
     }
 
     updateProperties(jGlobal, x, jmin, jmax);
+    setThickenedFlame(20.0,20.0,20.0);
 
     if (m_do_radiation) { // Calculation of qdotRadiation
         computeRadiation(x, jmin, jmax);
@@ -345,7 +346,6 @@ void Flow1D::updateProperties(size_t jg, span<const double> x, size_t jmin, size
     // properties are computed for grid points from j0 to j1
     size_t j0 = std::max<size_t>(jmin, 1) - 1;
     size_t j1 = std::min(jmax+1,m_points-1);
-
     updateThermo(x, j0, j1);
     if (jg == npos || m_force_full_update) {
         // update transport properties only if a Jacobian is not being
@@ -670,7 +670,7 @@ void Flow1D::evalEnergy(span<const double> x, span<double> rsd, span<int> diag,
             }
 
             rsd[index(c_offset_T, j)] = - m_cp[j]*rho_u(x, j)*dTdz(x, j)
-                                        - conduction(x, j) - sum;
+                                        - conduction(x, j)*m_fth - sum/m_fr;
             rsd[index(c_offset_T, j)] /= (m_rho[j]*m_cp[j]);
             rsd[index(c_offset_T, j)] -= (m_qdotRadiation[j] / (m_rho[j] * m_cp[j]));
             if (!m_twoPointControl || (m_z[j] != m_tLeft && m_z[j] != m_tRight)) {
@@ -758,8 +758,8 @@ void Flow1D::evalSpecies(span<const double> x, span<double> rsd, span<int> diag,
     for (size_t j = j0; j <= j1; j++) {
         for (size_t k = 0; k < m_nsp; k++) {
             double convec = rho_u(x, j)*dYdz(x, k, j);
-            double diffus = 2*(m_flux(k, j) - m_flux(k, j-1)) / (z(j+1) - z(j-1));
-            rsd[index(c_offset_Y + k, j)] = (m_wt[k]*m_wdot(k, j)
+            double diffus = 2*(m_fsp*m_flux(k, j) - m_fsp*m_flux(k, j-1)) / (z(j+1) - z(j-1));
+            rsd[index(c_offset_Y + k, j)] = (m_wt[k]*m_wdot(k, j)/m_fr
                                               - convec - diffus) / m_rho[j]
                                             - rdt*(Y(x, k, j) - Y_prev(k, j));
             diag[index(c_offset_Y + k, j)] = 1;

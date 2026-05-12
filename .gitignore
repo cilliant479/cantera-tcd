@@ -58,3 +58,13 @@ coverage.info
 .pixi/*
 pixi.lock
 !.pixi/config.toml
+# Cantera Junk
+ct-env/
+
+adiabatic_flame.csv
+adiabatic_flame.yaml
+flamespeed.csv
+flamespeed.yaml
+samples/python/onedim/*_flame.csv
+samples/python/onedim/*_flame.yaml
+samples/python/onedim/premixed_counterflow_flame.csv
