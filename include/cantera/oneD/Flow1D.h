@@ -81,6 +81,13 @@ protected:
     void _setTransport(shared_ptr<Transport> trans) override;
 
 public:
+
+    // C.Thomas setter and getter methods to allow user modification
+    void setThickenedFlame(double fsp, double fth, double fr);
+    double getFsp();
+    double getFth();
+    double getFr();
+
     //! Set transport model by name.
     //! @param model  String specifying model name.
     //! @since New in %Cantera 3.0.
@@ -890,18 +897,6 @@ protected:
     vector<double> m_visc; //!< Dynamic viscosity at each grid point [Pa∙s]
     vector<double> m_tcon; //!< Thermal conductivity at each grid point [W/m/K]
 
-    // C.Thomas, Thickened Flame Properties
-    // Set default to 1.0 to check first if works
-    double m_fsp = 1.0;
-    double m_fth = 1.0;
-    double m_fr = 1.0;
-    // Setter method to allow user modification
-    void setThickenedFlame(double fsp, double fth, double fr) {
-    this->m_fsp = fsp;
-    this->m_fth = fth;
-    this->m_fr = fr;
-    }
-
     //! Coefficient used in diffusion calculations for each species at each grid point.
     //!
     //! The value stored is different depending on the transport model (multicomponent
@@ -1036,6 +1031,13 @@ protected:
 
     //! Temperature of the right control point when two-point control is enabled
     double m_tRight = Undef;
+
+     // C.Thomas, Thickened Flame Properties
+    // Set default to 1.0 to check first if works
+    double m_fsp = 1.0;
+    double m_fth = 1.0;
+    double m_fr = 1.0;
+
 
 public:
     //! Location of the point where temperature is fixed

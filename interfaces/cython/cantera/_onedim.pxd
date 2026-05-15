@@ -108,6 +108,10 @@ cdef extern from "cantera/oneD/Flow1D.h":
         double rightControlPointTemperature() except +translate_exception
         double rightControlPointCoordinate() except +translate_exception
         void setRightControlPointTemperature(double) except +translate_exception
+        void setThickenedFlame(double fsp, double fth, double fr)
+        double getFsp()
+        double getFth()
+        double getFr()
 
 
 cdef extern from "cantera/oneD/Sim1D.h":

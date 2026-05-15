@@ -1418,5 +1418,23 @@ void Flow1D::enableTwoPointControl(bool twoPointControl)
             "with axisymmetric flames.");
     }
 }
+// C. Thomas: memberwise assignment of thickening factors
+void Flow1D::setThickenedFlame(double fsp, double fth, double fr) {
+    this->m_fsp = fsp;
+    this->m_fth = fth;
+    this->m_fr = fr;
+    }
+
+double Flow1D::getFsp(){
+    return this->m_fsp;
+}
+
+double Flow1D::getFth(){
+    return this->m_fth;
+}
+
+double Flow1D::getFr(){
+    return this->m_fr;
+}
 
 } // namespace
