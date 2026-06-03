@@ -408,7 +408,7 @@ cdef class ThermoPhase(_SolutionBase):
             return 1.0
 
     def equilibrate(self, XY, solver='auto', double rtol=1e-9,
-                    int max_steps=1000, int max_iter=100, int estimate_equil=0,
+                    int max_steps=50000, int max_iter=100, int estimate_equil=0,
                     int log_level=0):
         """
         Set to a state of chemical equilibrium holding property pair
@@ -1776,6 +1776,22 @@ cdef class ThermoPhase(_SolutionBase):
         """
         def __get__(self):
             return self.thermo.maxTemp()
+
+    property enforce_temperature_limits:
+        """
+        Get/set whether temperature limits are enforced in iterative solvers.
+
+        When this option is disabled, property-pair setters and equilibrium
+        solvers may extrapolate beyond the nominal valid temperature range of
+        the thermodynamic data. Methods that converge outside this range should
+        issue a warning.
+
+        .. versionadded:: 4.0
+        """
+        def __get__(self):
+            return self.thermo.temperatureLimitsEnforced()
+        def __set__(self, enable):
+            self.thermo.setTemperatureLimitsEnforced(enable)
 
     property reference_pressure:
         """Reference state pressure [Pa]."""

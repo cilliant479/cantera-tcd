@@ -69,17 +69,31 @@ MultiPhaseEquil::MultiPhaseEquil(MultiPhase* mix, bool start, int loglevel) : m_
     // only extend to 273.15 K, and give unphysical results above this
     // temperature, leading (incorrectly) to Gibbs free energies at high
     // temperature lower than for liquid water.
+    //
+    // When start=true (the default for TP equilibration), the solver computes
+    // its own initial composition from elemental totals. In that case, if an
+    // excluded species has non-zero initial moles, its elemental contribution
+    // is tracked in b_missing and redistributed to valid component species
+    // before calling setInitialMoles.
+    vector<double> b_missing(m_nel, 0.0);
+    bool has_excluded_moles = false;
     for (size_t k = 0; k < m_nsp_mix; k++) {
         size_t ip = m_mix->speciesPhaseIndex(k);
         if (!m_mix->solutionSpecies(k) &&
                 !m_mix->tempOK(ip)) {
             m_incl_species[k] = 0;
             if (m_mix->speciesMoles(k) > 0.0) {
-                throw CanteraError("MultiPhaseEquil::MultiPhaseEquil",
-                                   "condensed-phase species"+ m_mix->speciesName(k)
-                                   + " is excluded since its thermo properties are \n"
-                                   "not valid at this temperature, but it has "
-                                   "non-zero moles in the initial state.");
+                if (!start) {
+                    throw CanteraError("MultiPhaseEquil::MultiPhaseEquil",
+                        "condensed-phase species {} is excluded since its thermo "
+                        "properties are\nnot valid at this temperature, but it has "
+                        "non-zero moles in the initial state.", m_mix->speciesName(k));
+                }
+                for (size_t m = 0; m < m_nel; m++) {
+                    b_missing[m] += m_mix->speciesMoles(k) *
+                                    m_mix->nAtoms(k, m_element[m]);
+                }
+                has_excluded_moles = true;
             }
         }
     }
@@ -123,6 +137,17 @@ MultiPhaseEquil::MultiPhaseEquil(MultiPhase* mix, bool start, int loglevel) : m_
     // linear Gibbs minimization. In this case, only the elemental composition
     // of the initial mixture state matters.
     if (start) {
+        if (has_excluded_moles) {
+            // Adjust m_moles to restore element contributions from excluded
+            // condensed-phase species. After Gaussian elimination, m_A has an identity
+            // matrix in the component-species columns, so adding b_missing[m] to
+            // m_moles[m_order[m]] changes only element m's total.
+            computeN();
+            for (size_t m = 0; m < m_nel; m++) {
+                m_moles[m_order[m]] += b_missing[m];
+            }
+            updateMixMoles();
+        }
         setInitialMoles(loglevel-1);
     }
     computeN();
@@ -296,12 +321,26 @@ void MultiPhaseEquil::getComponents(span<const size_t> order)
                 }
             }
             if (m != n) {
-                // Swap this row with the last non-zero row
+                // Swap this row with the last non-zero row, and keep m_element
+                // in sync so that the element index matches its A matrix row.
                 for (size_t k = 0; k < nColumns; k++) {
                     std::swap(m_A(n,k), m_A(m,k));
                 }
+                std::swap(m_element[m], m_element[n]);
             } else {
                 // All remaining rows are zero. Elimination is complete.
+                // The rank of the element matrix is m, which may be less than
+                // m_nel when some element constraints are linearly dependent
+                // (e.g., all species share a fixed H/C ratio). Update m_nel
+                // and resize arrays that depend on nFree().
+                if (m < m_nel) {
+                    m_nel = m;
+                    m_dxi.resize(nFree());
+                    m_deltaG_RT.assign(nFree(), 0.0);
+                    m_solnrxn.resize(nFree());
+                    m_N.resize(m_nsp, nFree());
+                    m_lastsort.resize(m_nel);
+                }
                 break;
             }
         }
@@ -420,8 +459,32 @@ void MultiPhaseEquil::step(double omega, span<double> deltaN, int loglevel)
         if (m_majorsp[k]) {
             m_moles[k] += omega * deltaN[k];
         } else {
-            m_moles[k] = fabs(m_moles[k])*std::min(10.0,
-                                                   exp(-m_deltaG_RT[ik - m_nel]));
+            // Minor non-component species use a non-linear update:
+            // moles_new = |m_moles[k]| * exp(-dG/RT), capped at 10x growth for
+            // stability. When m_moles[k] is exactly zero, this degenerates to 0
+            // regardless of dG; the species stays at 0 and the component
+            // correction below suppresses the would-be formation reaction.
+            size_t j = ik - m_nel;
+            double moles_new = fabs(m_moles[k])
+                               * std::min(10.0, exp(-m_deltaG_RT[j]));
+            // The components were already updated above by omega*deltaN, which
+            // assumes each noncomponent species k changes by omega*deltaN[k].
+            // The actual change here is moles_new - m_moles[k], so element
+            // balance has an "excess" error that should be corrected on the
+            // components. We only apply the correction when the imbalance is
+            // catastrophic — i.e., the Newton step expects a large change in
+            // this species but the exponential formula caps it at a small
+            // fraction. For modestly-trace species the imbalance is O(m_moles[k])
+            // and applying the correction routinely would destabilize convergence
+            // by perturbing trace component species.
+            double excess = (moles_new - m_moles[k]) - omega * deltaN[k];
+            if (fabs(excess) > 10.0 * fabs(moles_new - m_moles[k]) &&
+                    fabs(excess) > SmallNumber) {
+                for (size_t n = 0; n < m_nel; n++) {
+                    m_moles[m_order[n]] += m_N(n, j) * excess;
+                }
+            }
+            m_moles[k] = moles_new;
         }
     }
     updateMixMoles();
@@ -431,6 +494,31 @@ double MultiPhaseEquil::stepComposition(int loglevel)
 {
     m_iter++;
     double grad0 = computeReactionSteps(m_dxi);
+
+    // Drop trace stoichiometric (single-species) condensed phases that the current step
+    // would consume. Such a phase, with a mole number near the numerical floor left
+    // over from initialization, would otherwise pin the step size omega to a
+    // vanishingly small value (omega <= -moles/deltaN in the loop below), stalling
+    // progress on every other reaction. Because the step is removing it (dxi < 0, i.e.
+    // dG/RT for its formation reaction is positive), the phase should be absent. We
+    // zero its mole number and suppress its formation reaction here.
+    double total_moles = 0.0;
+    for (size_t k = 0; k < m_nsp; k++) {
+        total_moles += std::max(0.0, m_moles[k]);
+    }
+    double trace = Tiny * total_moles;
+    bool dropped = false;
+    for (size_t j = 0; j < nFree(); j++) {
+        size_t k = m_order[j + m_nel];
+        if (!m_dsoln[k] && m_moles[k] > 0.0 && m_moles[k] < trace && m_dxi[j] < 0.0) {
+            m_dxi[j] = 0.0;
+            m_moles[k] = 0.0;
+            dropped = true;
+        }
+    }
+    if (dropped) {
+        updateMixMoles();
+    }
 
     // compute the mole fraction changes.
     if (nFree()) {
@@ -488,7 +576,7 @@ double MultiPhaseEquil::stepComposition(int loglevel)
     }
 
     // now take a step with this scaled omega
-    step(omegamax, m_work);
+    step(omegamax, m_work, loglevel);
     // compute the gradient of G at this new position in the current direction.
     // If it is positive, then we have overshot the minimum. In this case,
     // interpolate back.
@@ -555,29 +643,44 @@ double MultiPhaseEquil::computeReactionSteps(span<double> dxi)
 
             // noncomponent term
             size_t kc = m_order[j + m_nel];
-            double nmoles = fabs(m_mix->speciesMoles(m_species[kc])) + Tiny;
-            double term1 = m_dsoln[kc]/nmoles;
+            size_t ip_kc = m_mix->speciesPhaseIndex(m_species[kc]);
+            double nmoles_kc = fabs(m_mix->speciesMoles(m_species[kc])) + Tiny;
+            double pm_kc = fabs(m_mix->phaseMoles(ip_kc)) + Tiny;
 
-            // sum over solution phases
+            // Phase correction: subtract (sum_{k in phase} nu_k)^2 / n_phase for
+            // each solution phase, which is the Hessian term for an ideal phase.
+            //
+            // For the phase containing kc, combine term1 = dsoln/nmoles_kc with
+            // the phase correction -nu_sum^2/pm_kc into a single fraction. This is
+            // algebraically equivalent but avoids catastrophic cancellation when
+            // pm_kc ≈ nmoles_kc (a trace single-species phase).
+            double nu_sum_kc = 0.0;
             double sum = 0.0;
             for (size_t ip = 0; ip < m_mix->nPhases(); ip++) {
-                ThermoPhase& p = m_mix->phase(ip);
-                if (p.nSpecies() > 1) {
-                    double psum = 0.0;
+                double pm = fabs(m_mix->phaseMoles(ip));
+                if (m_mix->phase(ip).nSpecies() > 1 && pm > 0.0) {
+                    double nu_sum = 0.0;
                     for (k = 0; k < m_nsp; k++) {
                         kc = m_species[k];
                         if (m_mix->speciesPhaseIndex(kc) == ip) {
-                            psum += pow(nu[k], 2);
+                            nu_sum += nu[k];
                         }
                     }
-                    sum -= psum / (fabs(m_mix->phaseMoles(ip)) + Tiny);
+                    if (ip == ip_kc) {
+                        nu_sum_kc = nu_sum;
+                    } else {
+                        sum -= nu_sum * nu_sum / (pm + Tiny);
+                    }
                 }
             }
+            kc = m_order[j + m_nel];
+            double term1 = (m_dsoln[kc]*pm_kc - nu_sum_kc*nu_sum_kc*nmoles_kc)
+                           / (nmoles_kc*pm_kc);
             double rfctr = term1 + csum + sum;
             if (fabs(rfctr) < Tiny) {
                 fctr = 1.0;
             } else {
-                fctr = 1.0/(term1 + csum + sum);
+                fctr = 1.0/rfctr;
             }
         }
         dxi[j] = -fctr*dg_rt;
@@ -606,7 +709,8 @@ void MultiPhaseEquil::computeN()
         m_sortindex[k] = moleFractions[k].second;
     }
 
-    for (size_t m = 0; m < m_nel; m++) {
+    bool reselect = m_force;
+    for (size_t m = 0; m < m_nel && !reselect; m++) {
         size_t k = 0;
         for (size_t ik = 0; ik < m_nsp; ik++) {
             k = m_sortindex[ik];
@@ -620,11 +724,33 @@ void MultiPhaseEquil::computeN()
                 ok = true;
             }
         }
-        if (!ok || m_force) {
-            getComponents(m_sortindex);
-            m_force = true;
-            break;
+        if (!ok) {
+            reselect = true;
         }
+    }
+
+    // Reselect the component basis if any current component has been depleted to a
+    // negligible mole number. A near-empty basis species throttles every reaction that
+    // must consume it (the step size is bounded by moles/|deltaN|), which stalls the
+    // solver in a limit cycle without converging. Reselecting from the
+    // mole-fraction-sorted list replaces the depleted species with an abundant,
+    // linearly-independent one when possible.
+    if (!reselect) {
+        double total_moles = 0.0;
+        for (size_t k = 0; k < m_nsp; k++) {
+            total_moles += std::max(0.0, m_moles[k]);
+        }
+        for (size_t m = 0; m < m_nel; m++) {
+            if (m_moles[m_order[m]] < 1.0e-3 * total_moles) {
+                reselect = true;
+                break;
+            }
+        }
+    }
+
+    if (reselect) {
+        getComponents(m_sortindex);
+        m_force = true;
     }
 }
 
@@ -632,23 +758,54 @@ double MultiPhaseEquil::error()
 {
     double err, maxerr = 0.0;
 
+    // Total moles in the mixture; used to scale the "negligible reaction" check
+    // below: a reaction whose maximum possible Gibbs reduction is far below the
+    // mixture scale cannot meaningfully change the composition and should not
+    // block convergence.
+    double total_moles = 0.0;
+    for (size_t k = 0; k < m_nsp; k++) {
+        total_moles += std::max(0.0, m_moles[k]);
+    }
+
     // examine every reaction
     for (size_t j = 0; j < nFree(); j++) {
         size_t ik = j + m_nel;
 
         // don't require formation reactions for solution species
         // present in trace amounts to be equilibrated
-        if (!isStoichPhase(ik) && fabs(moles(ik)) <= SmallNumber) {
+        if (!isStoichPhase(ik) && fabs(moles(ik)) <= Tiny) {
             err = 0.0;
-        }
-
-        // for stoichiometric phase species, no error if not present and
-        // delta G for the formation reaction is positive
-        if (isStoichPhase(ik) && moles(ik) <= 0.0 &&
+        } else if (isStoichPhase(ik) && moles(ik) <= 0.0 &&
                 m_deltaG_RT[j] >= 0.0) {
+            // for stoichiometric phase species, no error if not present and
+            // delta G for the formation reaction is positive
             err = 0.0;
         } else {
             err = fabs(m_deltaG_RT[j]);
+            // For an unfavorable (dG > 0) solution-phase formation reaction,
+            // the maximum extent achievable in a single step is bounded by
+            // the noncomponent's own moles (which the reaction is consuming)
+            // and by the components that the reaction would produce
+            // (m_N(n,j) > 0 in the same direction). If this maximum extent is
+            // far below the mixture scale, the reaction cannot meaningfully
+            // change the composition and its dG/RT — which can be set by
+            // floating-point noise in trace mole fractions — should not block
+            // convergence. We do not apply the same bound to favorable
+            // reactions because they can still grow a species from trace
+            // through repeated 10× steps of the exponential update formula.
+            if (!isStoichPhase(ik) && m_deltaG_RT[j] > 0.0) {
+                double max_extent = fabs(moles(ik));
+                for (size_t n = 0; n < m_nel; n++) {
+                    double nu = m_N(n, j);
+                    if (nu > 0.0) {
+                        double mc = std::max(0.0, m_moles[m_order[n]]);
+                        max_extent = std::min(max_extent, mc / nu);
+                    }
+                }
+                if (max_extent * err < 1.0e-15 * total_moles) {
+                    err = 0.0;
+                }
+            }
         }
         maxerr = std::max(maxerr, err);
     }

@@ -10,6 +10,7 @@
 #include "cantera/base/global.h"
 #include "cantera/base/ctexceptions.h"
 #include "ConnectorNode.h"
+#include "cantera/numerics/eigen_sparse.h"
 
 namespace Cantera
 {
@@ -51,6 +52,16 @@ public:
         throw NotImplementedError("FlowDevice::setMassFlowRate");
     }
 
+    //! Derivative of mass flow rate with respect to pressure difference.
+    //!
+    //! Returns `d(mdot)/d(P_in - P_out)` for the current state. A return value of zero
+    //! indicates that pressure coupling does not contribute Jacobian entries.
+    //!
+    //! @since New in %Cantera 4.0.
+    virtual double massFlowRate_ddP() const {
+        return 0.0;
+    }
+
     //! Get the device coefficient (defined by derived class).
     //! @since  New in %Cantera 3.2.
     double deviceCoefficient() const {
@@ -72,6 +83,61 @@ public:
     //! Mass flow rate (kg/s) of outlet species k. Returns zero if this species
     //! is not present in the upstream mixture.
     double outletSpeciesMassFlowRate(size_t k);
+
+    //! Add Jacobian terms proportional to derivatives of the mass flow rate.
+    //!
+    //! Adds entries for `coeff * d(mdot)/dy_j` to the specified global row of the
+    //! reactor network Jacobian. The flow device supplies the scalar derivative of
+    //! mass flow rate with respect to connector variables such as pressure drop while
+    //! the adjacent reactors supply derivatives of those variables with respect to
+    //! their state variables.
+    //!
+    //! @param[in,out] trips  Sparse Jacobian entries. Implementations append entries
+    //!     using global row and column indices in the reactor network.
+    //! @param row  Global row index receiving these chain-rule terms.
+    //! @param coeff  Multiplicative factor applied to `d(mdot)/dy_j`.
+    //! @param includePressureSpecies  Include pressure derivatives with respect to
+    //!     species state variables when pressure is a derived quantity. These terms
+    //!     may be dense and are controlled by preconditioner sparsity settings.
+    //! @since New in %Cantera 4.0.
+    virtual void addMassFlowRateJacobian(SparseTriplets& trips, size_t row,
+        double coeff, bool includePressureSpecies=true);
+
+    //! Add Jacobian terms proportional to derivatives of
+    //! `outletSpeciesMassFlowRate(k)`.
+    //!
+    //! Adds entries for `coeff * d(mdot * Y_k)/dy_j`, where `Y_k` is the upstream mass
+    //! fraction mapped to downstream species `k`.
+    //!
+    //! @param[in,out] trips  Sparse Jacobian entries. Implementations append entries
+    //!     using global row and column indices in the reactor network.
+    //! @param row  Global row index receiving these chain-rule terms.
+    //! @param k  Species index in the downstream reactor's phase.
+    //! @param coeff  Multiplicative factor applied to `d(mdot * Y_k)/dy_j`.
+    //! @param includeComposition  Include derivatives of upstream mass fraction `Y_k`
+    //!     with respect to upstream reactor state variables.
+    //! @param includePressureSpecies  Include pressure derivatives with respect to
+    //!     species state variables when pressure is a derived quantity.
+    //! @since New in %Cantera 4.0.
+    void addOutletSpeciesMassFlowRateJacobian(
+        SparseTriplets& trips, size_t row, size_t k, double coeff,
+        bool includeComposition=true, bool includePressureSpecies=true);
+
+    //! Add Jacobian terms for the inlet enthalpy dependence on upstream state.
+    //!
+    //! Adds entries for `coeff * mdot * d(h_in)/dy_j`, where `h_in` is the specific
+    //! enthalpy of the upstream reactor. This captures how the energy carried into a
+    //! downstream reactor changes when the upstream temperature or composition changes.
+    //!
+    //! @param[in,out] trips  Sparse Jacobian entries.
+    //! @param row  Global row index receiving these chain-rule terms.
+    //! @param coeff  Multiplicative factor applied to `mdot * d(h_in)/dy_j`.
+    //! @param includeComposition  Include derivatives of upstream enthalpy with respect
+    //!     to upstream species moles. These terms add composition-mediated fill-in and
+    //!     are controlled by preconditioner sparsity settings.
+    //! @since New in %Cantera 4.0.
+    void addInletEnthalpyJacobian(SparseTriplets& trips, size_t row, double coeff,
+                                   bool includeComposition=true);
 
     //! specific enthalpy
     double enthalpy_mass();
@@ -111,7 +177,7 @@ public:
     //! depends on the derived flow device class.
     //! @since  Changed in %Cantera 3.2. Previous version used a raw pointer.
     virtual void setPressureFunction(shared_ptr<Func1> f) {
-        m_pfunc = f.get();
+        m_pfunc = f;
     }
 
     //! Return current value of the time function.
@@ -129,7 +195,7 @@ public:
     //! depends on the derived flow device class.
     //! @since  Changed in %Cantera 3.2. Previous version used a raw pointer.
     virtual void setTimeFunction(shared_ptr<Func1> g) {
-        m_tfunc = g.get();
+        m_tfunc = g;
     }
 
     //! Set current reactor network time
@@ -141,13 +207,18 @@ public:
     }
 
 protected:
+    //! Return the derivative of the pressure function at `deltaP`.
+    //! @param deltaP  Pressure difference `P_in - P_out` [Pa].
+    //! @since New in %Cantera 4.0.
+    double pressureFunction_ddP(double deltaP) const;
+
     double m_mdot = Undef;
 
     //! Function set by setPressureFunction; used by updateMassFlowRate
-    Func1* m_pfunc = nullptr;
+    shared_ptr<Func1> m_pfunc;
 
     //! Function set by setTimeFunction; used by updateMassFlowRate
-    Func1* m_tfunc = nullptr;
+    shared_ptr<Func1> m_tfunc;
 
     //! Coefficient set by derived classes; used by updateMassFlowRate
     double m_coeff = 1.0;

@@ -8,6 +8,7 @@
 #include "cantera/zeroD/FlowDevice.h"
 #include "cantera/zeroD/ReactorNet.h"
 #include "cantera/zeroD/ReactorSurface.h"
+#include "cantera/zeroD/Wall.h"
 #include "cantera/kinetics/Kinetics.h"
 #include "cantera/thermo/ThermoPhase.h"
 #include "cantera/thermo/SurfPhase.h"
@@ -99,6 +100,10 @@ void IdealGasMoleReactor::updateState(span<const double> y)
     // moles of each species, and [K+1...] are the moles of surface
     // species on each wall.
     setMassFromMoles(y.subspan(m_sidx));
+    if (y[1] <= 0.0) {
+        throw CanteraError("IdealGasMoleReactor::updateState",
+            "Volume must be positive. Input value was {}", y[1]);
+    }
     m_vol = y[1];
     // set state
     m_thermo->setMolesNoTruncate(y.subspan(m_sidx, m_nsp));
@@ -239,6 +244,65 @@ void IdealGasMoleReactor::getJacobianElements(vector<Eigen::Triplet<double>>& tr
                 (specificHeat[j] * qdot - m_TotalCv * uk_dnkdnj_sums[j]) * denom);
         }
     }
+
+    // Add cross-reactor terms due to flow devices and walls.
+    bool includeComposition = !m_jac_skip_connector_composition_dependence;
+    bool includePressureSpecies =
+        !m_jac_skip_connector_pressure_composition_dependence;
+
+    if (!m_jac_skip_flow_devices) {
+        auto imw = m_thermo->inverseMolecularWeights();
+        for (auto outlet : m_outlet) {
+            for (size_t n = 0; n < m_nsp; n++) {
+                outlet->addOutletSpeciesMassFlowRateJacobian(trips,
+                    m_offset + m_sidx + n, n, -imw[n], includeComposition,
+                    includePressureSpecies);
+            }
+            if (m_energy && m_TotalCv != 0.0 && m_mass != 0.0) {
+                outlet->addMassFlowRateJacobian(trips, m_offset,
+                    -m_pressure * m_vol / (m_mass * m_TotalCv),
+                    includePressureSpecies);
+            }
+        }
+
+        for (auto inlet : m_inlet) {
+            for (size_t n = 0; n < m_nsp; n++) {
+                inlet->addOutletSpeciesMassFlowRateJacobian(trips,
+                    m_offset + m_sidx + n, n, imw[n], includeComposition,
+                    includePressureSpecies);
+            }
+            if (m_energy && m_TotalCv != 0.0) {
+                inlet->addMassFlowRateJacobian(trips, m_offset,
+                    inlet->enthalpy_mass() / m_TotalCv, includePressureSpecies);
+                // d(h_in)/d(upstream_state): temperature and (optionally) composition.
+                inlet->addInletEnthalpyJacobian(trips, m_offset,
+                    1.0 / m_TotalCv, includeComposition);
+                for (size_t n = 0; n < m_nsp; n++) {
+                    inlet->addOutletSpeciesMassFlowRateJacobian(trips, m_offset, n,
+                        -m_uk[n] * imw[n] / m_TotalCv, includeComposition,
+                        includePressureSpecies);
+                }
+            }
+        }
+    }
+
+    if (!m_jac_skip_walls) {
+        for (size_t i = 0; i < m_wall.size(); i++) {
+            int f = 2 * m_lr[i] - 1;
+            m_wall[i]->addExpansionRateJacobian(trips, m_offset + 1, -f,
+                                                includePressureSpecies);
+            if (m_energy && m_TotalCv != 0.0) {
+                // Connector preconditioner terms include numerator derivatives for
+                // wall work and heat transfer. Derivatives of m_TotalCv are omitted
+                // here to avoid dense temperature/composition fill-in.
+                double expansionCoeff = -(m_pressure + m_thermo->internalPressure())
+                                        * (-f) / m_TotalCv;
+                m_wall[i]->addExpansionRateJacobian(trips, m_offset, expansionCoeff,
+                                                    includePressureSpecies);
+                m_wall[i]->addHeatRateJacobian(trips, m_offset, f / m_TotalCv);
+            }
+        }
+    }
 }
 
 void IdealGasMoleReactor::getJacobianScalingFactors(
@@ -247,6 +311,78 @@ void IdealGasMoleReactor::getJacobianScalingFactors(
     f_species = 1.0 / m_vol;
     for (size_t k = 0; k < m_nsp; k++) {
         f_energy[k] = - m_uk[k] / m_TotalCv;
+    }
+}
+
+void IdealGasMoleReactor::addPressureJacobian(
+    SparseTriplets& trips, size_t row, double coeff, bool includeSpecies) const
+{
+    // dP/dT|_V = (pi_T + P) / T, where pi_T = internalPressure() = T*(dP/dT)_V - P.
+    // For ideal gas: pi_T = 0, giving P/T; non-ideal EOS returns the correct pi_T.
+    double dPdT = (m_thermo->internalPressure() + m_pressure)
+                  / m_thermo->temperature();
+    // dP/dV_total|_T = -1/(V * kappa_T), where kappa_T = isothermalCompressibility().
+    // For ideal gas: kappa_T = 1/P, giving -P/V.
+    double dPdV = -1.0 / (m_vol * m_thermo->isothermalCompressibility());
+    if (!isJacobianLocalRow(row)) {
+        // Local temperature-column entries are already captured by the finite
+        // difference temperature column in getJacobianElements. Cross-reactor
+        // temperature entries are not, so they are added here.
+        trips.emplace_back(row, m_offset, coeff * dPdT);
+    }
+    trips.emplace_back(row, m_offset + 1, coeff * dPdV);
+    if (includeSpecies) {
+        // Species derivatives: use the ideal-gas approximation dP/dn_k = R*T/V for all
+        // k. For non-ideal phases the exact partial molar pressure derivative would
+        // require EOS-specific evaluation, but these terms are skipped by default.
+        double dPdn = GasConstant * m_thermo->temperature() / m_vol;
+        for (size_t k = 0; k < m_nsp; k++) {
+            trips.emplace_back(row, m_offset + m_sidx + k, coeff * dPdn);
+        }
+    }
+}
+
+void IdealGasMoleReactor::addEnthalpyJacobian(SparseTriplets& trips, size_t row,
+    double coeff, bool includeComposition) const
+{
+    // d(h_mass)/dT = cp_mass
+    addTemperatureJacobian(trips, row, coeff * m_thermo->cp_mass());
+    if (includeComposition) {
+        // d(h_mass)/d(n_k) = (h_k_molar - h_mass * W_k) / m_mass
+        vector<double> hbar(m_nsp);
+        m_thermo->getPartialMolarEnthalpies(hbar);
+        double h_mass = m_thermo->enthalpy_mass();
+        auto mw = m_thermo->molecularWeights();
+        for (size_t k = 0; k < m_nsp; k++) {
+            trips.emplace_back(row, m_offset + m_sidx + k,
+                               coeff * (hbar[k] - h_mass * mw[k]) / m_mass);
+        }
+    }
+}
+
+void IdealGasMoleReactor::addTemperatureJacobian(
+    SparseTriplets& trips, size_t row, double coeff) const
+{
+    if (!isJacobianLocalRow(row)) {
+        // Local temperature-column entries are already captured by the finite
+        // difference temperature column in getJacobianElements. Cross-reactor
+        // temperature entries are not, so they are added here.
+        trips.emplace_back(row, m_offset, coeff);
+    }
+}
+
+void IdealGasMoleReactor::addSpeciesMassFractionJacobian(
+    SparseTriplets& trips, size_t row, size_t k, double coeff) const
+{
+    auto mw = m_thermo->molecularWeights();
+    double Yk = m_thermo->massFraction(k);
+    // Convert flow-carried composition derivatives from dY_k/dy to dY_k/dn_j.
+    for (size_t j = 0; j < m_nsp; j++) {
+        double dYdn = -Yk * mw[j] / m_mass;
+        if (j == k) {
+            dYdn += mw[k] / m_mass;
+        }
+        trips.emplace_back(row, m_offset + m_sidx + j, coeff * dYdn);
     }
 }
 

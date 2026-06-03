@@ -153,12 +153,16 @@ class ThermoPhase(_SolutionBase):
     def basis(self) -> Basis: ...
     @basis.setter
     def basis(self, value: Basis) -> None: ...
+    @property
+    def enforce_temperature_limits(self) -> bool: ...
+    @enforce_temperature_limits.setter
+    def enforce_temperature_limits(self, enable: bool) -> None: ...
     def equilibrate(
         self,
         XY: PropertyPair,
         solver: EquilibriumSolver = "auto",
         rtol: float = 1e-9,
-        max_steps: int = 1000,
+        max_steps: int = 50000,
         max_iter: int = 100,
         estimate_equil: int = 0,
         log_level: LogLevel = 0,

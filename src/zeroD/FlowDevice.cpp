@@ -7,6 +7,7 @@
 #include "cantera/zeroD/ReactorBase.h"
 #include "cantera/thermo/ThermoPhase.h"
 #include "cantera/numerics/Func1.h"
+#include <limits>
 
 namespace Cantera
 {
@@ -72,9 +73,68 @@ double FlowDevice::outletSpeciesMassFlowRate(size_t k)
     return m_mdot * m_in->massFraction(ki);
 }
 
+void FlowDevice::addMassFlowRateJacobian(SparseTriplets& trips, size_t row,
+    double coeff, bool includePressureSpecies)
+{
+    double alpha = massFlowRate_ddP();
+    if (alpha == 0.0) {
+        return;
+    }
+    // Chain rule for mdot(P_in - P_out): the flow device supplies dmdot/dDeltaP,
+    // while reactors supply dP/dy for their state variables.
+    m_in->addPressureJacobian(trips, row, coeff * alpha, includePressureSpecies);
+    m_out->addPressureJacobian(trips, row, -coeff * alpha, includePressureSpecies);
+}
+
+void FlowDevice::addOutletSpeciesMassFlowRateJacobian(
+    SparseTriplets& trips, size_t row, size_t k, double coeff,
+    bool includeComposition, bool includePressureSpecies)
+{
+    if (k >= m_nspout) {
+        return;
+    }
+    size_t ki = m_out2in[k];
+    if (ki == npos) {
+        return;
+    }
+    double Yin = m_in->massFraction(ki);
+    // FlowDevice transports species as mdot * Y_in. Mole reactors store n_k, so the
+    // upstream reactor converts dY_in/dy to dY_in/dn_j as needed.
+    addMassFlowRateJacobian(trips, row, coeff * Yin, includePressureSpecies);
+    if (includeComposition && m_mdot != 0.0) {
+        m_in->addSpeciesMassFractionJacobian(trips, row, ki, coeff * m_mdot);
+    }
+}
+
 double FlowDevice::enthalpy_mass()
 {
     return m_in->enthalpy_mass();
+}
+
+double FlowDevice::pressureFunction_ddP(double deltaP) const
+{
+    if (!m_pfunc) {
+        return 1.0;
+    }
+    try {
+        return m_pfunc->derivative()->eval(deltaP);
+    } catch (CanteraError&) {
+        // Fall back to central finite difference for functions without analytic
+        // derivatives (for example, Tabulated1 with nearest-neighbor interpolation,
+        // or user-defined Func1 subclasses).
+        double eps = std::sqrt(std::numeric_limits<double>::epsilon())
+                     * std::max(1.0, std::abs(deltaP));
+        return (m_pfunc->eval(deltaP + eps) - m_pfunc->eval(deltaP - eps))
+               / (2.0 * eps);
+    }
+}
+
+void FlowDevice::addInletEnthalpyJacobian(SparseTriplets& trips, size_t row,
+    double coeff, bool includeComposition)
+{
+    if (m_mdot != 0.0) {
+        m_in->addEnthalpyJacobian(trips, row, coeff * m_mdot, includeComposition);
+    }
 }
 
 }

@@ -58,7 +58,7 @@ print(f"Running Cantera version: {ct.__version__}")
 # can be found in the paper by Zhang et al. [1]_ We will use the same mechanism reported
 # in the paper. It consists of 1268 species and 5336 reactions.
 
-gas = ct.Solution("example_data/n-hexane-NUIG-2015.yaml")
+gas = ct.Solution("example_data/n-heptane-NUIG-2016.yaml")
 
 # %%
 # Define initial conditions
@@ -284,8 +284,9 @@ plt.show()
 # References
 # ----------
 #
-# .. [1] K. Zhang, C. Banyon, C. Togbé, P. Dagaut, J. Bugler, H. J. Curran (2015). "An
-#        experimental and kinetic modeling study of n-hexane oxidation," *Combustion and
-#        Flame* 162:11, 4194-4207, https://doi.org/10.1016/j.combustflame.2015.08.001.
+# .. [1] K. Zhang, C. Banyon, J. Bugler, H. J. Curran, A. Rodriguez, O. Herbinet, F.
+#        Battin-Leclerc, C. B'Chir, K. A. Heufer (2016). "An updated experimental and
+#        kinetic modeling study of n-heptane oxidation," *Combustion and Flame* 172,
+#        116-135, https://doi.org/10.1016/j.combustflame.2016.06.028.
 
 # sphinx_gallery_thumbnail_number = -1

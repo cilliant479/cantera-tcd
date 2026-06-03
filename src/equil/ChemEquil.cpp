@@ -37,7 +37,47 @@ int _equilflag(const char* xy)
     } else {
         throw CanteraError("_equilflag","unknown property pair "+flag);
     }
-    return -1;
+}
+
+namespace
+{
+
+const char* targetPropertyName(int XY)
+{
+    switch (XY) {
+    case HP:
+    case PH:
+        return "enthalpy";
+    case SP:
+    case PS:
+    case SV:
+    case VS:
+        return "entropy";
+    case UV:
+    case VU:
+        return "internal energy";
+    default:
+        return "specified property";
+    }
+}
+
+[[noreturn]] void throwTemperatureBoundError(const string& XYstr, int XY,
+                                             double target, double current,
+                                             double currentT, double Tmin,
+                                             double Tmax, int boundDirection)
+{
+    string bound = boundDirection > 0 ? "upper" : "lower";
+    double Tbound = boundDirection > 0 ? Tmax : Tmin;
+    throw CanteraError("ChemEquil::equilibrate",
+        "Equilibration with the '{}' property pair failed because the solver "
+        "reached the {} temperature bound of {} K. The target {} is {}, but "
+        "the current value is {} at T = {} K. The enforced temperature bounds "
+        "are {} K to {} K. Disable temperature-limit enforcement to allow "
+        "extrapolation beyond this range.",
+        XYstr, bound, Tbound, targetPropertyName(XY), target, current,
+        currentT, Tmin, Tmax);
+}
+
 }
 
 ChemEquil::ChemEquil(ThermoPhase& s)
@@ -49,7 +89,6 @@ void ChemEquil::initialize(ThermoPhase& s)
 {
     // store a pointer to s and some of its properties locally.
     m_phase = &s;
-    m_p0 = s.refPressure();
     m_kk = s.nSpecies();
     m_mm = s.nElements();
     m_nComponents = m_mm;
@@ -60,8 +99,6 @@ void ChemEquil::initialize(ThermoPhase& s)
     m_comp.resize(m_mm * m_kk);
     m_jwork1.resize(m_mm+2);
     m_jwork2.resize(m_mm+2);
-    m_startSoln.resize(m_mm+1);
-    m_grt.resize(m_kk);
     m_mu_RT.resize(m_kk);
     m_muSS_RT.resize(m_kk);
     m_component.resize(m_mm,npos);
@@ -135,10 +172,8 @@ void ChemEquil::setToEquilState(ThermoPhase& s, span<const double> lambda_RT, do
 
 void ChemEquil::update(const ThermoPhase& s)
 {
-    // get the mole fractions, temperature, and density
+    // get the mole fractions
     s.getMoleFractions(m_molefractions);
-    m_temp = s.temperature();
-    m_dens = s.density();
 
     // compute the elemental mole fractions
     double sum = 0.0;
@@ -302,7 +337,6 @@ int ChemEquil::equilibrate(ThermoPhase& s, const char* XY, int loglevel)
 int ChemEquil::equilibrate(ThermoPhase& s, const char* XYstr,
                            span<double> elMolesGoal, int loglevel)
 {
-    int fail = 0;
     bool tempFixed = true;
     int XY = _equilflag(XYstr);
     vector<double> state(s.stateSize());
@@ -356,9 +390,9 @@ int ChemEquil::equilibrate(ThermoPhase& s, const char* XYstr,
         throw CanteraError("ChemEquil::equilibrate",
                            "illegal property pair '{}'", XYstr);
     }
-    // If the temperature is one of the specified variables, and
-    // it is outside the valid range, throw an exception.
-    if (tempFixed) {
+    // If the temperature is one of the specified variables, and it is outside
+    // the valid range, throw an exception if strict limits are requested.
+    if (tempFixed && options.enforceTemperatureLimits) {
         double tfixed = s.temperature();
         if (tfixed > s.maxTemp() + 1.0 || tfixed < s.minTemp() - 1.0) {
             throw CanteraError("ChemEquil::equilibrate", "Specified temperature"
@@ -404,21 +438,29 @@ int ChemEquil::equilibrate(ThermoPhase& s, const char* XYstr,
     }
     s.setMoleFractions(xmm);
 
-    // Update the internally stored values of m_temp, m_dens, and the element
-    // mole fractions.
+    // Update the internally stored element mole fractions.
     update(s);
 
     double tmaxPhase = s.maxTemp();
     double tminPhase = s.minTemp();
+    double tminSolver = options.enforceTemperatureLimits ? tminPhase :
+        clip(SmallNumber, 0.5 * tminPhase, 100.0);
+    double tmaxSolver = options.enforceTemperatureLimits ? tmaxPhase :
+        std::max(tmaxPhase + 1000.0, 10.0 * tmaxPhase);
+    if (tmaxSolver <= tminSolver) {
+        tmaxSolver = tminSolver + 20.0;
+    }
+    int limitingTemperatureBound = 0;
+
     // loop to estimate T
     if (!tempFixed) {
-        double tmin = std::max(s.temperature(), tminPhase);
-        if (tmin > tmaxPhase) {
-            tmin = tmaxPhase - 20;
+        double tmin = std::max(s.temperature(), tminSolver);
+        if (tmin > tmaxSolver) {
+            tmin = tmaxSolver - 20;
         }
-        double tmax = std::min(tmin + 10., tmaxPhase);
-        if (tmax < tminPhase) {
-            tmax = tminPhase + 20;
+        double tmax = std::min(tmin + 10., tmaxSolver);
+        if (tmax < tminSolver) {
+            tmax = tminSolver + 20;
         }
 
         double slope, phigh, plow, pval, dt;
@@ -467,16 +509,21 @@ int ChemEquil::equilibrate(ThermoPhase& s, const char* XYstr,
                 break;
             }
             dt = clip(dt, -200.0, 200.0);
-            if ((t0 + dt) < tminPhase) {
-                dt = 0.5*((t0) + tminPhase) - t0;
+            if ((t0 + dt) < tminSolver) {
+                dt = 0.5*((t0) + tminSolver) - t0;
             }
-            if ((t0 + dt) > tmaxPhase) {
-                dt = 0.5*((t0) + tmaxPhase) - t0;
+            if ((t0 + dt) > tmaxSolver) {
+                dt = 0.5*((t0) + tmaxSolver) - t0;
             }
             // update the T estimate
             t0 += dt;
-            if (t0 <= tminPhase || t0 >= tmaxPhase || t0 < 100.0) {
-                throw CanteraError("ChemEquil::equilibrate", "T out of bounds");
+            if (t0 <= tminSolver || t0 >= tmaxSolver) {
+                double current = m_p1(s);
+                double currentT = s.temperature();
+                s.restoreState(state);
+                throwTemperatureBoundError(XYstr, XY, xval, current, currentT,
+                                           tminPhase, tmaxPhase,
+                                           t0 >= tmaxSolver ? 1 : -1);
             }
             s.setTemperature(t0);
         }
@@ -518,19 +565,22 @@ int ChemEquil::equilibrate(ThermoPhase& s, const char* XYstr,
         }
     }
 
-    // Set the temperature bounds to be 25 degrees different than the max and
-    // min temperatures.
-    above[mm] = log(s.maxTemp() + 25.0);
-    below[mm] = log(s.minTemp() - 25.0);
+    // Set temperature bounds. By default, these are broad numerical guardrails
+    // rather than the nominal validity limits of the thermodynamic fits. The
+    // log(T) step is separately damped below to avoid large extrapolation steps.
+    if (options.enforceTemperatureLimits) {
+        above[mm] = log(tmaxPhase);
+        below[mm] = log(std::max(SmallNumber, tminPhase));
+    } else {
+        above[mm] = log(tmaxSolver);
+        below[mm] = log(tminSolver);
+    }
 
-    vector<double> grad(nvar, 0.0); // gradient of f = F*F/2
     vector<double> oldx(nvar, 0.0); // old solution
-    vector<double> oldresid(nvar, 0.0);
 
     for (int iter = 0; iter < options.maxIterations; iter++) {
         // check for convergence.
         equilResidual(s, x, elMolesGoal, res_trial, xval, yval);
-        double f = 0.5*dot(res_trial.begin(), res_trial.end(), res_trial.begin());
         double xx = m_p1(s);
         double yy = m_p2(s);
         double deltax = (xx - xval)/xval;
@@ -580,7 +630,6 @@ int ChemEquil::equilibrate(ThermoPhase& s, const char* XYstr,
         // compute the residual and the Jacobian using the current
         // solution vector
         equilResidual(s, x, elMolesGoal, res_trial, xval, yval);
-        f = 0.5*dot(res_trial.begin(), res_trial.end(), res_trial.begin());
 
         // Compute the Jacobian matrix
         equilJacobian(s, x, elMolesGoal, jac, xval, yval);
@@ -607,7 +656,6 @@ int ChemEquil::equilibrate(ThermoPhase& s, const char* XYstr,
         }
 
         oldx = x;
-        double oldf = f;
         scale(res_trial.begin(), res_trial.end(), res_trial.begin(), -1.0);
 
         // Solve the system
@@ -624,6 +672,17 @@ int ChemEquil::equilibrate(ThermoPhase& s, const char* XYstr,
         // find the factor by which the Newton step can be multiplied
         // to keep the solution within bounds.
         double fctr = 1.0;
+        // Track strict temperature bounds reached by the undamped Newton step.
+        // The damped iterate can remain just inside the bound, so remember the
+        // limiting direction across iterations for max-iteration diagnostics.
+        if (options.enforceTemperatureLimits && !tempFixed) {
+            double newTempVal = x[mm] + res_trial[mm];
+            if (newTempVal > above[mm]) {
+                limitingTemperatureBound = 1;
+            } else if (newTempVal < below[mm]) {
+                limitingTemperatureBound = -1;
+            }
+        }
         for (size_t m = 0; m < nvar; m++) {
             double newval = x[m] + res_trial[m];
             if (newval > above[m]) {
@@ -652,29 +711,32 @@ int ChemEquil::equilibrate(ThermoPhase& s, const char* XYstr,
         // multiply the step by the scaling factor
         scale(res_trial.begin(), res_trial.end(), res_trial.begin(), fctr);
 
-        if (!dampStep(s, oldx, oldf, grad, res_trial,
-                      x, f, elMolesGoal , xval, yval)) {
-            fail++;
-            if (fail > 3) {
-                s.restoreState(state);
-                throw CanteraError("ChemEquil::equilibrate",
-                                   "Cannot find an acceptable Newton damping coefficient.");
-            }
-        } else {
-            fail = 0;
-        }
+        dampStep(oldx, res_trial, x);
     }
 
     // no convergence
+    // If no proposed step crossed a bound, the final damped state may still
+    // identify the limiting bound.
+    if (options.enforceTemperatureLimits && !tempFixed && limitingTemperatureBound == 0) {
+        if (x[mm] >= above[mm] - 1e-10) {
+            limitingTemperatureBound = 1;
+        } else if (x[mm] <= below[mm] + 1e-10) {
+            limitingTemperatureBound = -1;
+        }
+    }
+    double current = m_p1(s);
+    double currentT = s.temperature();
     s.restoreState(state);
+    if (limitingTemperatureBound != 0) {
+        throwTemperatureBoundError(XYstr, XY, xval, current, currentT,
+                                   tminPhase, tmaxPhase, limitingTemperatureBound);
+    }
     throw CanteraError("ChemEquil::equilibrate",
                        "no convergence in {} iterations.", options.maxIterations);
 }
 
 
-int ChemEquil::dampStep(ThermoPhase& mix, span<double> oldx, double oldf,
-                        span<double> grad, span<double> step, span<double> x,
-                        double& f, span<double> elmols, double xval, double yval)
+void ChemEquil::dampStep(span<double> oldx, span<double> step, span<double> x)
 {
     // Carry out a delta damping approach on the dimensionless element
     // potentials.
@@ -708,7 +770,6 @@ int ChemEquil::dampStep(ThermoPhase& mix, span<double> oldx, double oldf,
             writelogf("     % -10.5g   % -10.5g    % -10.5g\n", x[m], oldx[m], step[m]);
         }
     }
-    return 1;
 }
 
 void ChemEquil::equilResidual(ThermoPhase& s, span<const double> x,
@@ -737,7 +798,7 @@ void ChemEquil::equilResidual(ThermoPhase& s, span<const double> x,
         }
     }
 
-    if (loglevel > 0 && !m_doResPerturb) {
+    if (loglevel > 0) {
         writelog("Residual:      ElFracGoal     ElFracCurrent     Resid\n");
         for (size_t n = 0; n < m_mm; n++) {
             writelogf("               % -14.7E % -14.7E    % -10.5E\n",
@@ -750,7 +811,7 @@ void ChemEquil::equilResidual(ThermoPhase& s, span<const double> x,
     resid[m_mm] = xx/xval - 1.0;
     resid[m_skip] = yy/yval - 1.0;
 
-    if (loglevel > 0 && !m_doResPerturb) {
+    if (loglevel > 0) {
         writelog("               Goal           Xvalue          Resid\n");
         writelogf("      XX   :   % -14.7E % -14.7E    % -10.5E\n", xval, xx, resid[m_mm]);
         writelogf("      YY(%1d):   % -14.7E % -14.7E    % -10.5E\n", m_skip, yval, yy, resid[m_skip]);
@@ -769,7 +830,6 @@ void ChemEquil::equilJacobian(ThermoPhase& s, span<double> x, span<const double>
 
     equilResidual(s, x, elmols, r0, xval, yval, loglevel-1);
 
-    m_doResPerturb = false;
     for (size_t n = 0; n < len; n++) {
         double xsave = x[n];
         double dx = std::max(atol, fabs(xsave) * 1.0E-7);
@@ -786,7 +846,6 @@ void ChemEquil::equilJacobian(ThermoPhase& s, span<double> x, span<const double>
         }
         x[n] = xsave;
     }
-    m_doResPerturb = false;
 }
 
 double ChemEquil::calcEmoles(ThermoPhase& s, span<double> x, const double& n_t,
