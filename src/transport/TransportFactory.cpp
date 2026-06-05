@@ -7,6 +7,7 @@
 #include "cantera/transport/MultiTransport.h"
 #include "cantera/transport/MixTransport.h"
 #include "cantera/transport/UnityLewisTransport.h"
+#include "cantera/transport/SimplifiedTransport.h"
 #include "cantera/transport/IonGasTransport.h"
 #include "cantera/transport/WaterTransport.h"
 #include "cantera/transport/DustyGasTransport.h"
@@ -32,6 +33,8 @@ TransportFactory::TransportFactory()
     addDeprecatedAlias("none", "");
     reg("unity-Lewis-number", []() { return new UnityLewisTransport(); });
     addDeprecatedAlias("unity-Lewis-number", "UnityLewis");
+    reg("simplified", []() { return new SimplifiedTransport(); });
+    addDeprecatedAlias("simplified", "Simplified");
     reg("mixture-averaged", []() { return new MixTransport(); });
     addDeprecatedAlias("mixture-averaged", "Mix");
     reg("mixture-averaged-CK", []() { return new MixTransport(); });

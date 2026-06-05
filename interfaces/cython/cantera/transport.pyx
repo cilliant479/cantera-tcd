@@ -187,7 +187,7 @@ cdef class Transport(_SolutionBase):
     property transport_model:
         """
         Get/Set the string specifying the transport model, such as `multicomponent`,
-        `mixture-averaged`, or `unity-Lewis-number`.
+        `mixture-averaged`, `unity-Lewis-number` or `simplified` .
 
         Setting a new transport model deletes the underlying C++ Transport
         object and replaces it with a new one implementing the specified model.
@@ -217,7 +217,7 @@ cdef class Transport(_SolutionBase):
         """Electrical conductivity. [S/m]."""
         def __get__(self):
             return self.transport.electricalConductivity()
-
+    
     property thermal_conductivity:
         """
         Thermal conductivity. [W/m/K]
@@ -337,6 +337,13 @@ cdef class Transport(_SolutionBase):
                                                                         dtype=np.double)
         tran_setViscosityPolynomial(self.transport, i,
                                     span[double](&data[0], data.size))
+                                    
+    def set_lewis_number(self, double value):
+        (<CxxSimplifiedTransport*>self.transport).setLe(value)
+        
+    def set_prandtl_number(self, double value):
+        (<CxxSimplifiedTransport*>self.transport).setPrandtl(value)
+        
 
     def set_thermal_conductivity_polynomial(self, i, values):
         """
@@ -369,6 +376,7 @@ cdef class Transport(_SolutionBase):
                                                                         dtype=np.double)
         tran_setBinDiffusivityPolynomial(self.transport, i, j,
                                         span[double](&data[0], data.size))
+                                        
 
     def set_collision_integral_polynomial(self, i, j, avalues, bvalues, cvalues,
                                           actualT=False):
@@ -401,6 +409,7 @@ cdef class Transport(_SolutionBase):
         self.transport.setCollisionIntegralPolynomial(i, j,
             span[double](&adata[0], adata.size), span[double](&bdata[0], bdata.size),
             span[double](&cdata[0], cdata.size), actualT)
+            
 
     property transport_fitting_errors:
         """

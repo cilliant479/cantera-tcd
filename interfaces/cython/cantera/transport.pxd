@@ -33,6 +33,11 @@ cdef extern from "cantera/transport/DustyGasTransport.h" namespace "Cantera":
         CxxTransport& gasTransport() except +translate_exception
 
 
+cdef extern from "cantera/transport/SimplifiedTransport.h" namespace "Cantera":
+    cdef cppclass CxxSimplifiedTransport "Cantera::SimplifiedTransport":
+        void setLe(double) except +translate_exception
+        void setPrandtl(double) except +translate_exception
+
 cdef extern from "cantera/transport/TransportData.h" namespace "Cantera":
     cdef cppclass CxxTransportData "Cantera::TransportData":
         CxxTransportData()

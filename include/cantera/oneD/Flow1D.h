@@ -964,8 +964,11 @@ protected:
     ThermoBasis m_fluxGradientBasis = ThermoBasis::molar;
 
     //! `true` if transport fluxes are computed using the multicomponent diffusion
-    //! coefficients, or `false` if mixture-averaged diffusion coefficients are used.
+    //! coefficients, or `false` if mixture-averaged or simplified diffusion coefficients are used.
     bool m_do_multicomponent = false;
+
+    // false if simplified diffusion is to be used
+    bool m_do_mixture_average = true;
 
     //! Determines whether radiative heat loss is calculated.
     //! @see enableRadiation, radiationEnabled, computeRadiation

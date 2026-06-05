@@ -326,7 +326,6 @@ void Flow1D::eval(size_t jGlobal, span<const double> xGlobal, span<double> rsdGl
     }
 
     updateProperties(jGlobal, x, jmin, jmax);
-    setThickenedFlame(20.0,20.0,20.0);
 
     if (m_do_radiation) { // Calculation of qdotRadiation
         computeRadiation(x, jmin, jmax);
@@ -385,7 +384,8 @@ void Flow1D::updateTransport(span<const double> x, size_t j0, size_t j1)
                 m_trans->getThermalDiffCoeffs(m_dthermal.col(j));
             }
         }
-    } else { // mixture averaged transport
+    } else { // mixture averaged or simplified transport
+        if (m_do_mixture_average){ // mixture averaged
         for (size_t j = j0; j < j1; j++) {
             setGasAtMidpoint(x,j);
             m_visc[j] = (m_dovisc ? m_trans->viscosity() : 0.0);
@@ -413,6 +413,10 @@ void Flow1D::updateTransport(span<const double> x, size_t j0, size_t j1)
                 m_trans->getThermalDiffCoeffs(m_dthermal.col(j));
             }
         }
+    }
+    else{ //simplified transport
+
+    }
     }
 }
 
@@ -1436,5 +1440,7 @@ double Flow1D::getFth(){
 double Flow1D::getFr(){
     return this->m_fr;
 }
+
+
 
 } // namespace
