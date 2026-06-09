@@ -668,13 +668,13 @@ void Flow1D::evalEnergy(span<const double> x, span<double> rsd, span<int> diag,
             grad_hk(x, j);
             double sum = 0.0;
             for (size_t k = 0; k < m_nsp; k++) {
-                double flxk = 0.5*(m_flux(k, j-1) + m_flux(k, j));
-                sum += m_wdot(k, j)*m_hk(k, j);
+                double flxk = 0.5*(m_flux(k, j-1)*m_fsp + m_flux(k, j)*m_fsp);
+                sum += m_wdot(k, j)*m_hk(k, j)/m_fr;
                 sum += flxk * m_dhk_dz(k, j) / m_wt[k];
             }
 
             rsd[index(c_offset_T, j)] = - m_cp[j]*rho_u(x, j)*dTdz(x, j)
-                                        - conduction(x, j)*m_fth - sum/m_fr;
+                                        - conduction(x, j)*m_fth - sum;
             rsd[index(c_offset_T, j)] /= (m_rho[j]*m_cp[j]);
             rsd[index(c_offset_T, j)] -= (m_qdotRadiation[j] / (m_rho[j] * m_cp[j]));
             if (!m_twoPointControl || (m_z[j] != m_tLeft && m_z[j] != m_tRight)) {
@@ -1423,7 +1423,7 @@ void Flow1D::enableTwoPointControl(bool twoPointControl)
     }
 }
 // C. Thomas: memberwise assignment of thickening factors
-void Flow1D::setThickenedFlame(double fsp, double fth, double fr) {
+void Flow1D::setThickenedFlame(double fth, double fsp, double fr) {
     this->m_fsp = fsp;
     this->m_fth = fth;
     this->m_fr = fr;

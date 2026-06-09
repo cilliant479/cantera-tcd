@@ -904,13 +904,13 @@ cdef class FlowBase(Domain1D):
         def __set__(self, enable):
             self.flow.enableTwoPointControl(<cbool>enable)
 
-    def set_stretched_thickened_flame(self, double fsp, double fth, double fr):
-        "set Fsp, Fth, Fr"
-        self.flow.setThickenedFlame(fsp, fth, fr)
+    def set_stretched_thickened_flame(self, double fth, double fsp, double fr):
+        "set Fth, Fsp, Fr"
+        self.flow.setThickenedFlame(fth, fsp, fr)
 
     def get_stretched_thickened_flame(self):
-        "get Fsp, Fth, Fr"
-        return (self.flow.getFsp(),self.flow.getFth(), self.flow.getFr())
+        "get Fth, Fsp, Fr"
+        return (self.flow.getFth(),self.flow.getFsp(), self.flow.getFr())
 
 
 cdef class FreeFlow(FlowBase):
