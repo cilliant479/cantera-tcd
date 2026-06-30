@@ -1,0 +1,46 @@
+description: |-
+  Two-step global propane-air mechanism used by Detomaso et al.
+  in "A generalization of the Thickened Flame model for stretched flames"
+  (Combustion and Flame 258, 2023, 113080).
+
+  Intended validation condition: phi = 0.9, Tu = 300 K, P = 1 bar.
+
+  The equivalence-ratio-dependent Pre-Exponential Adjustment (PEA)
+  functions f1(phi) and f2(phi) from Eqs. (16)-(17) are not implemented.
+  At phi = 0.9, f1 = 0.999288 and f2 = 0.999977, so both are set to 1.
+
+  Thermodynamic and molecular transport data are imported from gri30.yaml.
+  IMPORTANT: the paper instead imposes a constant Lewis number Le = 1.4
+  (same Schmidt number for all species) and a constant mixture Prandtl
+  number. That transport treatment must be imposed separately in the solver
+  to reproduce the paper's flame-speed and stretch-response results.
+
+  The numerical pre-exponential factors and activation energies are taken
+  directly from Table 2 of the paper. Because the global reaction orders are
+  non-integer, the dimensional units of A follow Cantera's reaction-order-
+  dependent convention under the global cm/mol/s unit system.
+
+units: {length: cm, time: s, quantity: mol, activation-energy: cal/mol}
+
+phases:
+- name: gas
+  thermo: ideal-gas
+  kinetics: gas
+  transport: mixture-averaged
+  elements: [C, H, O, N]
+  species:
+  - gri30.yaml/species: [C3H8, O2, CO, H2O, CO2, N2]
+  reactions: all
+  state: {T: 300.0 K, P: 1 bar}
+
+reactions:
+# Reaction 1: propane oxidation. The explicit orders are those in Table 2.
+- equation: C3H8 + 3.5 O2 => 3 CO + 4 H2O
+  rate-constant: {A: 2.534e11, b: 0.0, Ea: 3.27e4}
+  orders: {C3H8: 0.845, O2: 0.631}
+
+# Reaction 2: reversible CO oxidation. The forward mass-action orders
+# (CO^1 O2^0.5) equal the stoichiometric coefficients, while Cantera obtains
+# the reverse rate from the equilibrium constant and species thermodynamics.
+- equation: CO + 0.5 O2 <=> CO2
+  rate-constant: {A: 2.0e9, b: 0.0, Ea: 1.2e4}
