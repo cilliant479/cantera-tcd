@@ -1,148 +1,503 @@
-.. Cantera
+Cantera Research Fork: Stretched Thickened-Flame Model
+======================================================
 
-|cantera|
+Overview
+--------
 
-|doi| |codecov| |ci| |release|
+This repository is a research fork of Cantera implementing additional modelling
+capabilities for one-dimensional laminar flame calculations, with a focus on
+simplified transport properties and stretched thickened-flame modelling.
 
+The ``feature/stretched-thickened-flame`` branch includes:
 
-What is Cantera?
-================
+* A simplified transport model with user-controlled effective Lewis and
+  Prandtl numbers.
+* An artificially thickened-flame model for one-dimensional freely propagating
+  and strained flame calculations.
+* A stretched thickened-flame model intended to preserve the response of an
+  artificially thickened flame to stretch.
+* Python frontend access to the added model controls.
+* Validation notebooks comparing the implementations against reference
+  calculations and published results.
 
-Cantera is an open-source collection of object-oriented software tools for
-problems involving chemical kinetics, thermodynamics, and transport processes.
-Among other things, it can be used to:
+This fork is experimental research software developed as part of a PhD project.
+It is not an official Cantera release.
 
-* Evaluate thermodynamic and transport properties of mixtures
-* Compute chemical equilibrium
-* Evaluate species chemical production rates
-* Conduct kinetics simulations with large reaction mechanisms
-* Simulate one-dimensional flames
-* Conduct reaction path analysis
-* Create process simulations using networks of stirred reactors
-* Model non-ideal fluids
+Relationship to Cantera
+-----------------------
 
-Cantera can be used from a number of different programming languages. Numerous examples
-are available on the Cantera website:
+Cantera is an open-source suite of tools for chemical kinetics,
+thermodynamics, transport processes, and reacting-flow simulations.
 
-* `Python <https://cantera.org/stable/examples/python/index.html>`_
-* `Matlab <https://cantera.org/stable/examples/matlab/index.html>`_
-* `C++ <https://cantera.org/stable/examples/cxx/index.html>`_
-* `C <https://cantera.org/stable/examples/clib/index.html>`_
-* `Fortran 90 <https://cantera.org/stable/examples/fortran/index.html>`_
+This repository is based on Cantera and retains the original Cantera licence
+and attribution.
 
-Installation
-============
+* `Cantera website <https://cantera.org>`_
+* `Original Cantera source code <https://github.com/Cantera/cantera>`_
+* `Cantera documentation <https://cantera.org/documentation>`_
 
-|pip| |conda-forge|
+Fork Lineage
+~~~~~~~~~~~~
 
-`Installation instructions for the current release of Cantera
-<https://cantera.org/stable/install/index.html>`_ are available from the main `Cantera
-documentation site <https://cantera.org>`_.
+The stretched thickened-flame implementation was developed from the author's
+existing Cantera research fork:
 
-- The Python module can also be installed using pip on Windows, macOS, and Linux.
+* `Base fork <https://github.com/cilliant479/cantera-tcd/tree/main>`_
+* Base version: Cantera ``4.0.0a1``
+* `Feature branch <https://github.com/cilliant479/cantera-tcd/tree/feature/stretched-thickened-flame>`_
 
-- Conda packages containing the Cantera Python and Matlab modules are also available
-  for Windows, macOS, and Linux.
+The ``main`` branch of ``cantera-tcd`` provides the baseline fork used for this
+work. The ``feature/stretched-thickened-flame`` branch adds the simplified
+transport, thickened-flame, and stretched thickened-flame functionality
+described here.
 
-- Additional installation packages are provided for Ubuntu, Gentoo, and FreeBSD.
+Implemented Models
+------------------
 
-- For other platforms, or for users wishing to install a development version of
-  Cantera, `compilation instructions <https://cantera.org/stable/develop/index.html>`_
-  are also available.
+Simplified Transport Model
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The simplified transport model allows the user to prescribe effective Lewis
+and Prandtl numbers for controlled one-dimensional flame calculations.
+
+A common effective mass diffusivity is assigned to all species, removing
+preferential diffusion and providing a controlled transport framework for
+examining thickened-flame behaviour.
+
+Artificially Thickened-Flame Model
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The artificially thickened-flame model of Colin et al. [1]_ increases the flame
+thickness by modifying the balance between diffusion and chemical source terms
+while preserving the unstretched laminar flame speed.
+
+The implementation is tested using one-dimensional freely propagating flames,
+for which the expected changes in flame speed, flame thickness, and temperature
+profile can be examined directly.
+
+Stretched Thickened-Flame Model
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The formulation of Detomaso et al. [2]_ generalises the classical
+thickened-flame transformation to stretched flames.
+
+The model introduces separate factors for thermal conduction, species
+diffusion, and chemical source terms:
+
+* ``Fth``: thermal-conduction factor.
+* ``Fsp``: species-diffusion factor.
+* ``Fr``: reaction-rate factor.
+
+These factors are supplied through the Python frontend. The validation scripts
+use the relationships proposed by Detomaso et al., but alternative
+relationships may also be tested without recompiling the C++ backend.
 
 Documentation
-=============
+-------------
 
-The `documentation <https://cantera.org>`_ offers a number of starting points:
+An overview of the technical documentation is available at:
 
-- `Python tutorial
-  <https://cantera.org/stable/userguide/python-tutorial.html>`_
-- `Application Examples in Python
-  <https://cantera.org/stable/examples/python/index.html>`_
-- `A guide to Cantera's input file format
-  <https://cantera.org/stable/userguide/input-tutorial.html>`_
-- `User Guide: Tutorials, FAQ, and Task Guides
-  <https://cantera.org/stable/userguide/index.html>`
-- `Information about the Cantera community
-  <https://cantera.org/community.html>`_
-- `Affiliated packages
-  <https://cantera.org/affiliated.html>`_
+* `Documentation overview <docs/README.md>`_
+* `Full PDF documentation <docs/cantera_tcd_documentation.pdf>`_
 
-Code of Conduct
-===============
+The documentation contains:
 
-.. image:: https://img.shields.io/badge/Contributor%20Covenant-2.0-4baaaa.svg
-    :alt: conduct
-    :target: https://www.contributor-covenant.org/version/2/0/code_of_conduct/
+* The simplified transport formulation.
+* The governing one-dimensional flame equations.
+* Backend modifications to the species and energy equations.
+* Python frontend access to the new controls.
+* Artificially thickened-flame validation.
+* Stretched thickened-flame validation.
+* Comparisons with published reference values.
+* Current limitations of the implementation.
 
-In order to have a more open and welcoming community, Cantera adheres to a
-`code of conduct <CODE_OF_CONDUCT.md>`_ adapted from the `Contributor Covenant
-code of conduct <https://contributor-covenant.org/>`_.
+Installation and Build from Source
+----------------------------------
 
-Please adhere to this code of conduct in any interactions you have in the
-Cantera community. It is strictly enforced on all official Cantera
-repositories, websites, users' group, and other resources. If you encounter
-someone violating these terms, please `contact the code of conduct team
-<mailto:conduct@cantera.org>`_ (`@speth <https://github.com/speth>`_,
-`@bryanwweber <https://github.com/bryanwweber>`_, and `@kyleniemeyer
-<https://github.com/kyleniemeyer>`_) and we will address it as soon as
-possible.
+This branch must currently be built from source.
 
-Development Site
-================
+The workflow described below uses a local Python virtual environment named
+``ct-env`` and a helper script, ``dev_env.sh``, to configure the local build
+paths.
 
-The current development version is 4.0.0a1. The current stable version is
-3.2.0. The `latest Cantera source code <https://github.com/Cantera/cantera>`_,
-the `issue tracker <https://github.com/Cantera/cantera/issues>`_ for bugs and
-enhancement requests, `downloads of Cantera releases and binary installers
-<https://github.com/Cantera/cantera/releases>`_ , and the `Cantera wiki
-<https://github.com/Cantera/cantera/wiki>`_ can all be found on Github.
+The workflow has been tested on:
 
-Users' Group
-============
+* Ubuntu 24.04.4 LTS.
+* Windows 10 using WSL with Ubuntu 24.04.1 LTS.
 
-The `Cantera Users' Group <https://groups.google.com/group/cantera-users>`_ is a
-message board/mailing list for discussions amongst Cantera users.
+The instructions may require adaptation for other operating systems, compiler
+versions, Python versions, or SCons configurations.
 
-Continuous Integration Status
-=============================
+At present, ``scons install`` is not used for this fork. The locally compiled
+Python package and shared library are loaded directly from the ``build``
+directory.
 
-|ci|
+1. Install System Dependencies
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-NumFOCUS
-========
+On Ubuntu, install the required compiler and development packages:
 
-Cantera is a fiscally-sponsored project of `NumFOCUS <https://numfocus.org>`__,
-a non-profit dedicated to supporting the open source scientific computing
-community. Please consider `making a donation
-<https://numfocus.org/donate-to-cantera>`__ to support the
-development of Cantera through NumFOCUS.
+.. code-block:: bash
 
-.. image:: https://img.shields.io/badge/powered%20by-NumFOCUS-orange.svg?style=flat&colorA=E1523D&colorB=007D8A
-    :target: https://numfocus.org/donate-to-cantera
-    :alt: Powered by NumFOCUS
+   sudo apt update
+   sudo apt install build-essential g++ git python3 python3-venv \
+       python3-dev doxygen libboost-dev
 
-.. |cantera| image:: https://cantera.org/_static/cantera-logo.png
-    :target: https://cantera.org
-    :alt: cantera logo
-    :width: 675px
-    :align: middle
+If compilation reports that ``Python.h`` cannot be found, install the
+development package corresponding to the active Python version. For example:
 
-.. |ci| image:: https://github.com/Cantera/cantera/workflows/CI/badge.svg
-    :target: https://github.com/Cantera/cantera/actions?query=workflow%3ACI+event%3Apush
+.. code-block:: bash
 
-.. |doi| image:: https://zenodo.org/badge/DOI/10.5281/zenodo.14455267.svg
-   :target: https://doi.org/10.5281/zenodo.14455267
+   sudo apt install python3.12-dev
 
-.. |codecov| image:: https://img.shields.io/codecov/c/github/Cantera/cantera/main.svg
-   :target: https://codecov.io/gh/Cantera/cantera?branch=main
+Additional system dependencies may be required depending on the selected
+Cantera build configuration.
 
-.. |release| image:: https://img.shields.io/github/release/cantera/cantera.svg
-   :target: https://github.com/Cantera/cantera/releases
-   :alt: GitHub release
+2. Clone the Repository
+~~~~~~~~~~~~~~~~~~~~~~~
 
-.. |pip| image:: https://img.shields.io/pypi/v/cantera
-   :target: https://pypi.org/project/Cantera/
+.. code-block:: bash
 
-.. |conda-forge| image:: https://img.shields.io/conda/v/conda-forge/cantera
-   :target: https://anaconda.org/conda-forge/cantera
+   git clone https://github.com/cilliant479/cantera-tcd.git
+   cd cantera-tcd
+   git checkout feature/stretched-thickened-flame
+
+3. Create a Python Virtual Environment
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Create and activate a local virtual environment named ``ct-env``:
+
+.. code-block:: bash
+
+   python3 -m venv ct-env
+   source ct-env/bin/activate
+
+Upgrade the Python packaging tools:
+
+.. code-block:: bash
+
+   python -m pip install --upgrade pip setuptools wheel
+
+Install the Python build, testing, and validation dependencies:
+
+.. code-block:: bash
+
+   python -m pip install scons cython numpy scipy matplotlib pandas jupyter
+   python -m pip install ruamel.yaml pytest jinja2
+   python -m pip install "typing_extensions>=4.13.0"
+
+The ``ct-env`` directory is a local development environment and should not be
+committed to the repository.
+
+4. Load the Development Environment
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The repository includes a helper script named ``dev_env.sh``.
+
+The script should be sourced rather than executed:
+
+.. code-block:: bash
+
+   source dev_env.sh
+
+The script:
+
+* Activates ``ct-env``.
+* Adds ``build/python`` to ``PYTHONPATH``.
+* Adds ``build/lib`` to ``LD_LIBRARY_PATH``.
+* Sets ``CANTERA_DATA`` to the repository's ``data`` directory.
+
+The current script is:
+
+.. code-block:: bash
+
+   #!/usr/bin/env bash
+
+   # This file should be sourced, not executed:
+   #   source dev_env.sh
+
+   REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+   cd "$REPO_ROOT" || return 1
+
+   source ct-env/bin/activate
+
+   export PYTHONPATH="$REPO_ROOT/build/python:$PYTHONPATH"
+   export LD_LIBRARY_PATH="$REPO_ROOT/build/lib:$LD_LIBRARY_PATH"
+   export CANTERA_DATA="$REPO_ROOT/data"
+
+   echo "Cantera dev environment loaded."
+   echo "Repo: $REPO_ROOT"
+   echo "Python: $(which python)"
+
+5. Build Cantera
+~~~~~~~~~~~~~~~~
+
+Clean files from any previous build:
+
+.. code-block:: bash
+
+   scons clean
+
+Build the fork using SCons:
+
+.. code-block:: bash
+
+   scons build -j8
+
+The value supplied to ``-j`` may be adjusted for the number of processor cores
+available on the machine.
+
+The local build is created in:
+
+.. code-block:: text
+
+   build/python
+   build/lib
+
+6. Verify the Local Build
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+After building and sourcing ``dev_env.sh``, verify that Python imports the
+modified local version:
+
+.. code-block:: python
+
+   import cantera as ct
+
+   print(ct.__version__)
+   print(ct.__file__)
+
+The expected version is:
+
+.. code-block:: text
+
+   4.0.0a1
+
+The path printed by ``ct.__file__`` should point to the local repository,
+normally within ``build/python``.
+
+If Python imports Cantera from a global installation, Conda environment, or
+``site-packages``, the local development environment has not been configured
+correctly.
+
+Usage
+-----
+
+A minimal freely propagating flame example is shown below.
+
+.. code-block:: python
+
+   import cantera as ct
+
+   gas = ct.Solution("gri30.yaml")
+
+   gas.TP = 300.0, ct.one_atm
+   gas.set_equivalence_ratio(
+       phi=0.7,
+       fuel="CH4",
+       oxidizer={"O2": 1.0, "N2": 3.76},
+   )
+
+   gas.transport_model = "simplified"
+   gas.set_lewis_number(1.4)
+   gas.set_prandtl_number(0.7)
+
+   flame = ct.FreeFlame(gas, width=0.03)
+
+   # Arguments: Fth, Fsp, Fr
+   flame.set_stretched_thickened_flame(
+       1.0,
+       1.0,
+       1.0,
+   )
+
+   flame.solve(
+       loglevel=1,
+       auto=True,
+   )
+
+   print("Laminar flame speed:", flame.velocity[0])
+
+The original unthickened equations are recovered using:
+
+.. code-block:: python
+
+   flame.set_stretched_thickened_flame(
+       1.0,
+       1.0,
+       1.0,
+   )
+
+A classical thickened-flame transformation can be applied using equal factors:
+
+.. code-block:: python
+
+   F = 5.0
+
+   flame.set_stretched_thickened_flame(
+       F,
+       F,
+       F,
+   )
+
+For the stretched thickened-flame formulation, ``Fth``, ``Fsp``, and ``Fr``
+may be assigned independently:
+
+.. code-block:: python
+
+   flame.set_stretched_thickened_flame(
+       Fth,
+       Fsp,
+       Fr,
+   )
+
+The assigned values can be retrieved using:
+
+.. code-block:: python
+
+   Fth, Fsp, Fr = flame.get_stretched_thickened_flame()
+
+Validation Notebooks
+--------------------
+
+The following notebooks demonstrate and validate the implemented models:
+
+* `Simplified transport and ATF validation
+  <samples/python/stretchedTF/atf_simplified_validation.ipynb>`_
+* `Stretched thickened-flame validation
+  <samples/python/stretchedTF/stf_validation.ipynb>`_
+
+Run Jupyter from the configured development environment:
+
+.. code-block:: bash
+
+   source dev_env.sh
+   jupyter notebook
+
+The notebooks should be run from top to bottom using the locally compiled
+Cantera fork.
+
+Validation Scope
+----------------
+
+The simplified transport and thickened-flame implementations have been tested
+using the one-dimensional cases included in the validation notebooks.
+
+The stretched thickened-flame factors obtained using the supplied validation
+procedure are compared with the published values of Detomaso et al. [2]_.
+
+The implementation is considered validated for the one-dimensional test cases
+examined in the documentation. Further validation should be performed before
+applying the implementation to new fuels, chemical mechanisms, configurations,
+or large-eddy simulations.
+
+Implementation Notes
+--------------------
+
+The implementation modifies backend and frontend components of Cantera.
+
+Backend changes include:
+
+* A simplified transport class.
+* Modifications to species-diffusion terms.
+* Modifications to thermal-conduction terms.
+* Modifications to chemical source terms.
+* Storage and assignment of ``Fth``, ``Fsp``, and ``Fr``.
+
+Frontend changes expose the added transport and thickened-flame controls through
+the Python interface.
+
+A more detailed description of the modified equations and source files is
+provided in the technical documentation.
+
+Limitations
+-----------
+
+This branch is intended for research use and should be treated as experimental.
+
+Current limitations include:
+
+* Validation is limited to the cases supplied in the validation notebooks.
+* The implementation is focused on one-dimensional laminar flame calculations.
+* The model has not been tested with every Cantera transport model, chemical
+  mechanism, or flame configuration.
+* The thickening factors are currently supplied as global scalar values.
+* The installation workflow uses the local build because ``scons install`` is
+  not currently used.
+* The API may change as the implementation is developed further.
+
+Users should verify the implementation carefully before applying it to new
+mechanisms, fuels, configurations, or production calculations.
+
+Citation and Attribution
+------------------------
+
+Users of this fork should cite:
+
+#. The original Cantera software package.
+#. The artificially thickened-flame model of Colin et al. [1]_.
+#. The stretched thickened-flame model of Detomaso et al. [2]_.
+#. This research fork.
+
+When citing this fork, report the repository URL, branch or release tag, exact
+commit hash used, and access date.
+
+Suggested citation:
+
+   Thomas, C. *Cantera Research Fork: Stretched Thickened-Flame Model*.
+   GitHub repository, branch ``feature/stretched-thickened-flame``.
+   Available at
+   https://github.com/cilliant479/cantera-tcd/tree/feature/stretched-thickened-flame.
+   Include the release tag or exact commit hash used and the date accessed.
+
+To obtain the exact commit hash for a local checkout, run:
+
+.. code-block:: bash
+
+   git rev-parse HEAD
+
+Because this fork is based on a Cantera development version, users should also
+state that the implementation is based on Cantera ``4.0.0a1``.
+
+Licence
+-------
+
+This repository retains the original Cantera licence and attribution.
+
+The added stretched thickened-flame implementation is provided as experimental
+research software without warranty. See the repository licence file for
+details.
+
+Development Status
+------------------
+
+Current status:
+
+* Simplified transport model: tested in a validation notebook.
+* Artificially thickened-flame model: tested in a validation notebook.
+* Stretched thickened-flame model: compared with published reference values.
+* Local source build: working using ``scons build``.
+* Installation using ``scons install``: not currently used.
+
+Contact
+-------
+
+Author: `Cillian Thomas <mailto:thomasci@tcd.ie>`_
+
+This fork was developed as part of a PhD research project involving combustion
+modelling, large-eddy simulation, flame dynamics, and artificially thickened
+flame models.
+
+References
+----------
+
+.. [1] Colin, O., Ducros, F., Veynante, D., and Poinsot, T.
+   "A thickened flame model for large eddy simulations of turbulent premixed
+   combustion." *Physics of Fluids*, 12(7), 1843--1863, 2000.
+   https://doi.org/10.1063/1.870436
+
+.. [2] Detomaso, N., Hok, J.-J., Dounia, O., Laera, D., and Poinsot, T.
+   "A generalization of the Thickened Flame model for stretched flames."
+   *Combustion and Flame*, 258, 113080, 2023.
+   https://doi.org/10.1016/j.combustflame.2023.113080
